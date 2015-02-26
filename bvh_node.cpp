@@ -134,7 +134,7 @@ void BVHNode::convert (std::vector<GPUBVH>& gpuBVH, std::vector<GPUTriangle>& gp
 
     if (!this->triangles.empty())
     {
-        bvh.offsetRight = gpuTriangles.size();
+        bvh.jump_nodes = gpuTriangles.size();
         for (std::size_t triangleCounter=0; triangleCounter<this->triangles.size(); ++triangleCounter)
         {
             GPUTriangle triangle;
@@ -154,8 +154,25 @@ void BVHNode::convert (std::vector<GPUBVH>& gpuBVH, std::vector<GPUTriangle>& gp
 
     std::size_t index = gpuBVH.size();
     gpuBVH.push_back(bvh);
+
+	std::size_t left_index = gpuBVH.size();
     this->left->convert(gpuBVH, gpuTriangles, mesh);
-    gpuBVH[index].offsetRight = gpuBVH.size();
+
+	std::size_t right_index = gpuBVH.size();
     this->right->convert(gpuBVH, gpuTriangles, mesh);
+
+	int jump_nodes = 1;
+	if (gpuBVH[left_index].numTriangles == 0)
+		jump_nodes += gpuBVH[left_index].jump_nodes;
+	else
+		jump_nodes++;
+
+	if (gpuBVH[right_index].numTriangles == 0)
+		jump_nodes += gpuBVH[right_index].jump_nodes;
+	else
+		jump_nodes++;
+
+	gpuBVH[index].jump_nodes = jump_nodes;
+
     return;
 }

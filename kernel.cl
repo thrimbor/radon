@@ -25,8 +25,8 @@ typedef struct
 	AABB aabb;
 	
 	int numTriangles;
-
-	int right; // array index of the right child - if numTriangles > 0, then it contains triangleStart instead
+	
+	int jump_nodes;
 } Node;
 
 // primary ray generator
@@ -155,7 +155,7 @@ __kernel void primaryRayTraverser (__global const float3* rayDirections,
 								   )
 {
 	const int id = get_global_id(0);
-	
+
 	Intersection intersection;
 	intersection.distance = MAXFLOAT;
 	
@@ -163,47 +163,58 @@ __kernel void primaryRayTraverser (__global const float3* rayDirections,
 	const float3 direction = rayDirections[id];
 	const float3 invdir = native_recip(direction);
 	
-	int stack[STACK_SIZE];
 	int currentOffset = 0;
-	stack[0] = 0;
 	
 	for (;;)
 	{
-		const int i=stack[currentOffset];
-		const Node node = nodes[i];
+		const Node node = nodes[currentOffset];
 		
 		if (intersectAABB(&node.aabb, origin, invdir, intersection.distance))
 		{
-			// internal?
 			if (node.numTriangles == 0)
 			{
-				stack[currentOffset++] = node.right;
-				stack[currentOffset++] = i+1;
+				// internal node, step down to left
+				++currentOffset;
 			}
 			else
 			{
-				int triangle = node.right;
+				// leaf node, check triangles
+				int triangle = node.jump_nodes;
 				intersectTriangle(&triangles[triangle++], origin, direction, &intersection);
 				
-				if (triangle<node.numTriangles+node.right)
+				if (triangle<node.numTriangles+node.jump_nodes)
 				{
 					intersectTriangle(&triangles[triangle++], origin, direction, &intersection);
 					
-					if (triangle<node.numTriangles+node.right)
+					if (triangle<node.numTriangles+node.jump_nodes)
 					{
 						intersectTriangle(&triangles[triangle++], origin, direction, &intersection);
 						
-						if (triangle<node.numTriangles+node.right)
+						if (triangle<node.numTriangles+node.jump_nodes)
 						{
 							intersectTriangle(&triangles[triangle++], origin, direction, &intersection);
 						}
 					}
 				}
+				
+				if (currentOffset+1 >= MAXNODES) break;
+				++currentOffset;
 			}
 		}
+		else
+		{
+			if (node.numTriangles > 0)
+			{
+				++currentOffset;
+			}
+			else
+			{
+				if (currentOffset+node.jump_nodes >= MAXNODES) break;
+				currentOffset += node.jump_nodes;
+			}
+			
+		}
 		
-		if (currentOffset == 0) break;
-		--currentOffset;
 	}
 	
 	if (intersection.distance < MAXFLOAT)
@@ -382,48 +393,57 @@ inline bool aoTraverse(__global const Node* nodes,
 				const float3 origin,
 				const float3 direction)
 {
-	int stack[STACK_SIZE];
-	int currentOffset = 0;
-	stack[0] = 0;
 	const float3 invdir = native_recip(direction);
+	
+	int currentOffset = 0;
 	
 	for (;;)
 	{
-		const int i = stack[currentOffset];
-		const Node node = nodes[i];
+		const Node node = nodes[currentOffset];
 		
 		if (intersectAABB(&node.aabb, origin, invdir, AO_MAXDISTANCE))
 		{
 			// internal?
 			if (node.numTriangles == 0)
 			{
-				stack[currentOffset++] = node.right;
-				stack[currentOffset++] = i+1;
+				++currentOffset;
 			}
 			else
 			{
-				int triangle = node.right;
+				int triangle = node.jump_nodes;
 				if (aoIntersectTriangle(&triangles[triangle++], origin, direction)) return true;
 				
-				if (triangle<node.numTriangles+node.right)
+				if (triangle<node.numTriangles+node.jump_nodes)
 				{
 					if (aoIntersectTriangle(&triangles[triangle++], origin, direction)) return true;
 					
-					if (triangle<node.numTriangles+node.right)
+					if (triangle<node.numTriangles+node.jump_nodes)
 					{
 						if (aoIntersectTriangle(&triangles[triangle++], origin, direction)) return true;
 						
-						if (triangle<node.numTriangles+node.right)
+						if (triangle<node.numTriangles+node.jump_nodes)
 						{
 							if (aoIntersectTriangle(&triangles[triangle++], origin, direction)) return true;
 						}
 					}
 				}
+				
+				if (currentOffset+1 >= MAXNODES) break;
+				++currentOffset;
 			}
 		}
-		
-		if (currentOffset == 0) return false;
-		--currentOffset;
+		else
+		{
+			if (node.numTriangles > 0)
+			{
+				++currentOffset;
+			}
+			else
+			{
+				if (currentOffset+node.jump_nodes >= MAXNODES) break;
+				currentOffset += node.jump_nodes;
+			}
+		}
 	}
 	
 	return false;

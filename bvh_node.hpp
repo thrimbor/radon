@@ -28,7 +28,7 @@ struct GPUBVH
 {
     GPUAABB aabb;
     cl_int numTriangles;
-    cl_int offsetRight;
+	cl_int jump_nodes;
 };
 
 // A single node in the BVH. Every node stores its left and right children

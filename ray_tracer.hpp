@@ -1,6 +1,5 @@
 #pragma once
 
-#define __CL_ENABLE_EXCEPTIONS
 #include "cl_1.1.hpp"
 
 #include <vector>

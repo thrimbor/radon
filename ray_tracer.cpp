@@ -2,7 +2,6 @@
 #include <sstream>
 #include <fstream>
 
-#define __CL_ENABLE_EXCEPTIONS
 #include "cl_1.1.hpp"
 
 #include "ray_tracer.hpp"
@@ -17,6 +16,7 @@ RayTracer::RayTracer(RayTracer::Options const& opts, BVH const& scene)
 {
     this->opts = opts;
     this->totalSampleCount = opts.width*opts.height*opts.nSuperSamples*opts.nSuperSamples;
+	std::vector<GPUBVH> gpuBVH = scene.getGPUBVH();
 
     std::vector<cl::Platform> platforms;
     cl::Platform::get(&platforms);
@@ -50,6 +50,7 @@ RayTracer::RayTracer(RayTracer::Options const& opts, BVH const& scene)
 
     compilerOptions << " -D AO_SAMPLES=" << opts.aoNumSamples;
     compilerOptions << " -D AO_MAXDISTANCE=" << opts.aoMaxDistance << "f";
+	compilerOptions << " -D MAXNODES=" << gpuBVH.size();
     if (opts.ambientOcclusion) compilerOptions << " -D AO_ENABLED";
 
     compilerOptions << " -cl-single-precision-constant -cl-strict-aliasing -cl-mad-enable -cl-no-signed-zeros -cl-unsafe-math-optimizations -cl-finite-math-only -cl-fast-relaxed-math -Werror -cl-denorms-are-zero";
@@ -60,7 +61,20 @@ RayTracer::RayTracer(RayTracer::Options const& opts, BVH const& scene)
     cl::Program::Sources clSources;
     clSources.push_back(std::pair<const char *, size_t>(str, sourcecode.length()));
     cl::Program program(context, clSources, nullptr);
-    program.build(devices, defineString.c_str(), nullptr, nullptr);
+
+    try
+    {
+        program.build(devices, defineString.c_str(), nullptr, nullptr);
+    }
+    catch (cl::Error error)
+    {
+        if (error.err() == CL_BUILD_PROGRAM_FAILURE)
+        {
+            std::cout << "Build log:" << std::endl << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << std::endl;
+        }
+        throw error;
+    }
+
 
     primaryRayGenerator = cl::Kernel(program, "primaryRayGenerator", nullptr);
     primaryRayTraverser = cl::Kernel(program, "primaryRayTraverser", nullptr);
@@ -75,7 +89,6 @@ RayTracer::RayTracer(RayTracer::Options const& opts, BVH const& scene)
     primaryRayGenerator.setArg(2, opts.focalLength);
     primaryRayGenerator.setArg(3, raybuffer);
 
-    std::vector<GPUBVH> gpuBVH = scene.getGPUBVH();
     std::vector<GPUTriangle> triangles = scene.getGPUTriangles();
 
     nodeBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(GPUBVH)*gpuBVH.size(), nullptr, nullptr);
@@ -117,7 +130,6 @@ void
 RayTracer::trace(std::vector<unsigned char>* image)
 {
     cl::NDRange workItems(opts.width*opts.height);
-
     queue.enqueueNDRangeKernel(primaryRayGenerator, cl::NullRange, workItems, cl::NullRange, nullptr, nullptr);
 
     cl::NDRange workItems2(totalSampleCount);
